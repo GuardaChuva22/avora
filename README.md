@@ -23,4 +23,4 @@ A API atual NÃO executa comandos, não usa credenciais e não conecta IA. Ela e
 
 O motor (agente Avora/Codex/Claude) e o destino (Windows/cloud oficial/VPS) são escolhas independentes. PC online tem prioridade, sem pressupor que projetos locais estejam disponíveis na nuvem. Aprovações, isolamento, auditoria e controle de custo serão obrigatórios.
 
-Veja [arquitetura](docs/architecture.md), [requisitos](docs/requirements.md) e [roadmap](docs/roadmap.md).
+Documentos fundamentais: [catálogo completo — 263 requisitos](docs/requirements.md), [42 requisitos complementares](docs/requirements-complementares.md), [arquitetura](docs/architecture.md) e [roadmap](docs/roadmap.md).
