@@ -1,6 +1,7 @@
 package runner
 
 import (
+ "bytes"
  "context"
  "encoding/json"
  "net/http"
@@ -25,19 +26,14 @@ func TestRunnerEndToEnd(t *testing.T) {
  if err!=nil{t.Fatal(err)}
  ctx:=context.Background()
  if err:=c.Heartbeat(ctx);err!=nil{t.Fatal(err)}
- req,err:=http.NewRequest(http.MethodPost,server.URL+"/v1/jobs",nil)
- if err!=nil{t.Fatal(err)}
- // Submit a typed action through admin API, not arbitrary command.
- // Use explicit JSON body in a separate request.
- _=req
- jobReq,err:=http.NewRequest(http.MethodPost,server.URL+"/v1/jobs",stringsReader(`{"target":"windows","action":"ping"}`))
+ jobReq,err:=http.NewRequest(http.MethodPost,server.URL+"/v1/jobs",bytes.NewBufferString(`{"target":"windows","action":"ping"}`))
  if err!=nil{t.Fatal(err)}
  jobReq.Header.Set("Authorization","Bearer "+testAdmin)
  jobReq.Header.Set("Content-Type","application/json")
  res,err:=http.DefaultClient.Do(jobReq)
  if err!=nil{t.Fatal(err)}
  var job control.Job
- if err:=json.NewDecoder(res.Body).Decode(&job);err!=nil{t.Fatal(err)}
+ if err:=json.NewDecoder(res.Body).Decode(&job);err!=nil{res.Body.Close();t.Fatal(err)}
  res.Body.Close()
  if res.StatusCode!=http.StatusCreated{t.Fatalf("submit: %d",res.StatusCode)}
  if err:=c.Tick(ctx);err!=nil{t.Fatal(err)}
@@ -55,5 +51,3 @@ func TestRefusePlaintextRemote(t *testing.T) {
  if _,err:=NewClient("http://example.org:8080","pc",testDevice);err==nil {t.Fatal("accepted insecure remote HTTP")}
  if _,err:=NewClient("https://example.org/evil","pc",testDevice);err==nil {t.Fatal("accepted URL path")}
 }
-
-func stringsReader(s string) *bytes.Reader {return bytes.NewReader([]byte(s))}
