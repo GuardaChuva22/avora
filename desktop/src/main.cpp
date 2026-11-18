@@ -24,6 +24,19 @@
 #include <QQuickWindow>
 #include <QSvgRenderer>
 #include <QTimer>
+#include <QTextStream>
+#include <cstdlib>
+
+// QA: with AVORA_QA_LOG set, every Qt/QML message is appended to that file
+// (a GUI app on Windows has no console to print to).
+static void qaLog(QtMsgType, const QMessageLogContext &, const QString &msg)
+{
+    static QFile file(QString::fromLocal8Bit(qgetenv("AVORA_QA_LOG")));
+    if (!file.isOpen() && !file.open(QIODevice::Append | QIODevice::Text))
+        return;
+    QTextStream(&file) << msg << Qt::endl;
+    file.flush();
+}
 
 namespace {
 
@@ -46,6 +59,8 @@ int renderIcon(const QString &out)
 
 int main(int argc, char *argv[])
 {
+    if (qEnvironmentVariableIsSet("AVORA_QA_LOG"))
+        qInstallMessageHandler(qaLog);
     // The embedded browser shares GL contexts with the scene; set up first.
     QtWebEngineQuick::initialize();
     QGuiApplication app(argc, argv);
@@ -64,6 +79,7 @@ int main(int argc, char *argv[])
         {"render-icon", "Write the app icon as .ico and quit.", "file"},
         {"server", "Server URL to sign in to (test profiles only).", "url"},
         {"token-file", "File with a token to sign in with (test profiles only).", "file"},
+        {"click", "Click x,y;x,y;... inside the window after a moment, 1.5 s apart, before --grab (QA).", "points"},
         {"probe-cursor", "Hover x,y;x,y;... inside the window after a moment, print the cursor shape at each and quit (QA).", "points"},
     });
     cli.process(app);
@@ -142,6 +158,46 @@ int main(int argc, char *argv[])
             }
             QCoreApplication::quit();
         });
+    }
+
+    // Visual QA for navigation: synthetic clicks (the real mouse is never
+    // touched), 1.5 s apart, starting at 3.5 s; --grab-delay should cover them.
+    if (cli.isSet("click")) {
+        const QStringList points = cli.value("click").split(';', Qt::SkipEmptyParts);
+        for (int i = 0; i < points.size(); ++i) {
+            const QStringList xy = points[i].split(',');
+            if (xy.size() != 2)
+                continue;
+            const QPointF pos(xy[0].toDouble(), xy[1].toDouble());
+            QTimer::singleShot(3500 + i * 1500, window, [window, pos] {
+                const QPointF global = window->mapToGlobal(pos);
+                QMouseEvent move(QEvent::MouseMove, pos, global, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(window, &move);
+                QMouseEvent press(QEvent::MouseButtonPress, pos, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(window, &press);
+                // Who took the press: the item (or handler) and its parents.
+                if (!press.points().isEmpty()) {
+                    QObject *g = press.exclusiveGrabber(press.points().first());
+                    QString chain;
+                    for (QObject *o = g; o; o = o->parent())
+                        chain += QString(" < %1(%2)").arg(o->metaObject()->className(), o->objectName());
+                    qWarning().noquote() << "grabber" << pos << (g ? chain : QString("none"));
+                }
+                // Popups that are open, even when nothing of them shows.
+                for (QObject *o : window->findChildren<QObject *>()) {
+                    if (o->inherits("QQuickPopup") && (o->property("opened").toBool() || o->property("visible").toBool())) {
+                        QString chain;
+                        for (QObject *p = o; p; p = p->parent())
+                            chain += QString(" < %1(%2)").arg(p->metaObject()->className(), p->objectName());
+                        qWarning().noquote() << "open popup" << chain << "opened" << o->property("opened").toBool() << "visible" << o->property("visible").toBool() << "modal" << o->property("modal").toBool() << "dim" << o->property("dim").toBool()
+                                             << "w" << o->property("width").toDouble() << "h" << o->property("height").toDouble();
+                    }
+                }
+                QMouseEvent release(QEvent::MouseButtonRelease, pos, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(window, &release);
+                qWarning().noquote() << "clicked" << pos;
+            });
+        }
     }
 
     if (cli.isSet("grab")) {

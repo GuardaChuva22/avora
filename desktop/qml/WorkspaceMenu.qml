@@ -9,7 +9,6 @@ Popup {
     id: menu
     property Item anchorItem: null
 
-    readonly property Item overlayRoot: Overlay.overlay
     readonly property var mePerson: (Api.me && Api.me.person && Api.me.person.id) ? Api.me.person : null
     readonly property bool adminOnly: !Api.me || mePerson === null
     readonly property var rawWorkspaces: (Api.me && Api.me.workspaces) ? Api.me.workspaces : []
@@ -24,12 +23,6 @@ Popup {
         const fallbackId = Api.workspace !== "" ? Api.workspace : "pessoal";
         const fallbackName = fallbackId === "pessoal" ? "Pessoal" : fallbackId;
         return [{ id: fallbackId, name: fallbackName, icon: "", mode: "personal", role: "owner", status: "active" }];
-    }
-
-    property WorkspaceSheet workspaceModal: WorkspaceSheet {
-        parent: menu.overlayRoot
-        width: menu.overlayRoot ? menu.overlayRoot.width : 0
-        height: menu.overlayRoot ? menu.overlayRoot.height : 0
     }
 
     parent: Overlay.overlay
@@ -390,7 +383,7 @@ Popup {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         menu.close();
-                        menu.workspaceModal.open("create");
+                        win.openWorkspaceSheet("create");
                     }
                 }
             }
@@ -428,7 +421,7 @@ Popup {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         menu.close();
-                        menu.workspaceModal.open("join");
+                        win.openWorkspaceSheet("join");
                     }
                 }
             }
