@@ -904,6 +904,8 @@ func (s *Server) testConnector(w http.ResponseWriter, r *http.Request) {
 		conn.Status, conn.LastError = "error", truncate(err.Error(), 300)
 		_, _ = s.saveConnectionResult(r.Context(), con, conn, conn.Secret, false, s.now())
 	}
+	// A test reads the balance again too.
+	s.usage.drop(conn.ID)
 	writeJSON(w, http.StatusOK, s.connectorView(r.Context(), con))
 }
 

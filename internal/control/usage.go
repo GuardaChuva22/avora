@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -19,7 +20,11 @@ import (
 
 const (
 	usageTTL     = 3 * time.Minute
+	usageRetry   = 20 * time.Second
 	usageTimeout = 8 * time.Second
+	// A reading in the background waits longer: nobody is waiting on it,
+	// and an app's API can take most of a minute when it is slow.
+	usageBackground = 90 * time.Second
 )
 
 // ConnectionUsage is one account's reading, or why it failed.
@@ -42,7 +47,11 @@ func (u *usageCache) peek(id string, now time.Time) (v ConnectionUsage, have, fr
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	v, have = u.m[id]
-	return v, have, have && now.Sub(v.CheckedAt) < usageTTL
+	ttl := usageTTL
+	if v.Error != "" {
+		ttl = usageRetry // a failed reading is taken again soon
+	}
+	return v, have, have && now.Sub(v.CheckedAt) < ttl
 }
 
 // claim marks a background reading of id as started; false if one already is.
@@ -157,7 +166,9 @@ func (s *Server) connectionsUsage(ctx context.Context, con connect.Connector, co
 			continue
 		}
 		if !wait {
-			if have {
+			// A failed reading being taken again shows as pending, so the
+			// page asks once more instead of keeping the old error.
+			if have && v.Error == "" {
 				out[c.ID] = v
 			} else {
 				out[c.ID] = ConnectionUsage{Pending: true}
@@ -165,7 +176,7 @@ func (s *Server) connectionsUsage(ctx context.Context, con connect.Connector, co
 			if s.usage.claim(c.ID) {
 				go func(c store.Connection) {
 					defer s.usage.release(c.ID)
-					s.usage.set(c.ID, s.readUsage(context.Background(), reader, c))
+					s.usage.set(c.ID, s.readUsage(context.Background(), reader, c, usageBackground))
 				}(c)
 			}
 			continue
@@ -173,7 +184,7 @@ func (s *Server) connectionsUsage(ctx context.Context, con connect.Connector, co
 		wg.Add(1)
 		go func(c store.Connection) {
 			defer wg.Done()
-			v := s.readUsage(ctx, reader, c)
+			v := s.readUsage(ctx, reader, c, usageTimeout)
 			s.usage.set(c.ID, v)
 			mu.Lock()
 			out[c.ID] = v
@@ -185,18 +196,21 @@ func (s *Server) connectionsUsage(ctx context.Context, con connect.Connector, co
 }
 
 // readUsage asks the app for one account's usage.
-func (s *Server) readUsage(ctx context.Context, reader connect.UsageReader, c store.Connection) ConnectionUsage {
+func (s *Server) readUsage(ctx context.Context, reader connect.UsageReader, c store.Connection, wait time.Duration) ConnectionUsage {
 	v := ConnectionUsage{CheckedAt: s.now()}
 	cred, err := s.openCred(c)
 	if err == nil {
-		uctx, cancel := context.WithTimeout(ctx, usageTimeout)
+		uctx, cancel := context.WithTimeout(ctx, wait)
 		v.Usage, err = reader.Usage(uctx, &connect.Env{Conn: c.ID, Cred: &cred, Loc: s.zone(), Now: s.now})
 		cancel()
 	}
 	if err != nil {
 		v.Error = "não consegui ler o saldo"
-		if connect.IsAuth(err) {
+		switch {
+		case connect.IsAuth(err):
 			v.Error = "a chave não tem acesso ao plano (permissão User)"
+		case errors.Is(err, context.DeadlineExceeded):
+			v.Error = "o app demorou demais para dizer o saldo; tento de novo em instantes"
 		}
 	}
 	return v
