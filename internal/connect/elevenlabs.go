@@ -2,19 +2,36 @@ package connect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/GuardaChuva22/avora/internal/mcp"
 )
 
-// ElevenLabs: voices and text to speech with the owner's API key. Audio is
-// saved as an MP3 in the agent's folder.
+// ElevenLabs: voices and text to speech. An account connects with an API
+// key, or with the ElevenLabs login (OAuth through the authorization server
+// of its hosted MCP server). Audio is saved as an MP3 in the agent's folder.
 type ElevenLabs struct {
 	BaseURL string
+	// MCPURL is the hosted MCP server whose login Avora uses; empty means
+	// ElevenLabs' own. HTTP is for tests.
+	MCPURL string
+	HTTP   *http.Client
+
+	once  sync.Once
+	login *MCPApp
 }
+
+// elevenScope is what the login asks for: speech, voices and the account's
+// plan. Speech to Text has no OAuth scope; transcription needs a key.
+const elevenScope = "text_to_speech voice_generation user_read"
 
 const elevenModel = "eleven_multilingual_v2"
 
@@ -31,10 +48,40 @@ func (e *ElevenLabs) base() string {
 }
 
 func (e *ElevenLabs) Info() Info {
-	return Info{Kind: "elevenlabs", Name: "ElevenLabs", Ready: true, Category: "Com chave ou token", Auth: "token", Apps: []string{"ElevenLabs"},
+	return Info{Kind: "elevenlabs", Name: "ElevenLabs", Ready: true, Category: "Com chave ou token", Auth: "token", Login: true, OAuthPort: mcp.ClientPort, Apps: []string{"ElevenLabs"},
 		Description: "Vozes e texto para fala: os agentes geram áudios em MP3 na própria pasta.",
-		Help:        "Em elevenlabs.io: Developers → API Keys → Create API Key, com acesso a Text to Speech, Speech to Text, Voices e User (Speech to Text transcreve os áudios do WhatsApp). Cole a chave (sk_...).",
-		HelpURL:     "https://elevenlabs.io/app/developers/api-keys"}
+		Help: "Clique em Entrar com a ElevenLabs e autorize no navegador, ou cole uma chave: em elevenlabs.io, Developers → API Keys → Create API Key, com acesso a Text to Speech, Speech to Text, Voices e User. " +
+			"Só a chave transcreve os áudios do WhatsApp (o login da ElevenLabs não libera Speech to Text).",
+		HelpURL: "https://elevenlabs.io/app/developers/api-keys"}
+}
+
+func (e *ElevenLabs) mcpApp() *MCPApp {
+	e.once.Do(func() {
+		u := e.MCPURL
+		if u == "" {
+			u = "https://api.elevenlabs.io/v1/mcp"
+		}
+		e.login = &MCPApp{Kind: "elevenlabs", Name: "ElevenLabs", URL: u, Auth: mcp.AuthOAuth, Scope: elevenScope, HTTP: e.HTTP}
+	})
+	return e.login
+}
+
+// ByLogin says whether the account connected with the app's login instead
+// of a key.
+func ByLogin(c *Cred) bool { return c != nil && c.Extra["login"] == "oauth" }
+
+// BeginAuth and FinishAuth are the ElevenLabs login.
+func (e *ElevenLabs) BeginAuth(ctx context.Context, redirect, state, verifier string) (string, map[string]string, error) {
+	return e.mcpApp().BeginAuth(ctx, redirect, state, verifier)
+}
+
+func (e *ElevenLabs) FinishAuth(ctx context.Context, code, redirect, verifier string, extra map[string]string, now time.Time) (Cred, error) {
+	c, err := e.mcpApp().FinishAuth(ctx, code, redirect, verifier, extra, now)
+	if err != nil {
+		return c, err
+	}
+	c.Extra["login"] = "oauth"
+	return c, nil
 }
 
 func (e *ElevenLabs) Tools() []Tool {
@@ -60,8 +107,52 @@ func (e *ElevenLabs) Tools() []Tool {
 	}
 }
 
-func (e *ElevenLabs) header(env *Env) map[string]string {
-	return map[string]string{"xi-api-key": env.Cred.Token}
+// header authenticates a call: the key, or the login's token (renewed
+// when it is about to end, or when force is set).
+func (e *ElevenLabs) header(ctx context.Context, env *Env, force bool) (map[string]string, error) {
+	if !ByLogin(env.Cred) {
+		return map[string]string{"xi-api-key": env.Cred.Token}, nil
+	}
+	tok, err := e.mcpApp().token(ctx, env, force)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"Authorization": "Bearer " + tok}, nil
+}
+
+// send runs one API call; a login whose token was refused is renewed and
+// the call tried once more.
+func (e *ElevenLabs) send(ctx context.Context, env *Env, req request) ([]byte, error) {
+	base := req.Header
+	for try := 0; ; try++ {
+		h, err := e.header(ctx, env, try > 0)
+		if err != nil {
+			return nil, err
+		}
+		req.Header = map[string]string{}
+		for k, v := range base {
+			req.Header[k] = v
+		}
+		for k, v := range h {
+			req.Header[k] = v
+		}
+		body, _, err := do(ctx, req)
+		if IsAuth(err) && ByLogin(env.Cred) && try == 0 && env.Cred.Refresh != "" {
+			continue
+		}
+		return body, err
+	}
+}
+
+func (e *ElevenLabs) getJSON(ctx context.Context, env *Env, req request, out any) error {
+	data, err := e.send(ctx, env, req)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("resposta inesperada da API: %v", err)
+	}
+	return nil
 }
 
 type elevenSub struct {
@@ -79,7 +170,7 @@ type elevenUser struct {
 
 func (e *ElevenLabs) subscription(ctx context.Context, env *Env) (elevenSub, error) {
 	var s elevenSub
-	err := callJSON(ctx, request{URL: e.base() + "/v1/user/subscription", Header: e.header(env)}, &s)
+	err := e.getJSON(ctx, env, request{URL: e.base() + "/v1/user/subscription"}, &s)
 	return s, err
 }
 
@@ -96,17 +187,22 @@ func tail(id string) string {
 // the same plan are still two accounts.
 func (e *ElevenLabs) Check(ctx context.Context, env *Env) (string, error) {
 	var u elevenUser
-	err := callJSON(ctx, request{URL: e.base() + "/v1/user", Header: e.header(env)}, &u)
+	err := e.getJSON(ctx, env, request{URL: e.base() + "/v1/user"}, &u)
 	if err == nil && u.UserID != "" {
 		name := strings.TrimSpace(u.FirstName)
 		if name == "" {
 			name = "conta"
 		}
+		// A login is its own connection, beside a key of the same person:
+		// only the key transcribes.
+		if ByLogin(env.Cred) {
+			return name + " · …" + tail(u.UserID) + " · login", nil
+		}
 		return name + " · …" + tail(u.UserID), nil
 	}
 	// A key without the User permission can still speak; it is named by
 	// the end of the key itself.
-	if _, verr := e.voices(ctx, env, ""); verr == nil {
+	if _, verr := e.voices(ctx, env, ""); verr == nil && !ByLogin(env.Cred) {
 		return "chave …" + tail(env.Cred.Token), nil
 	}
 	if err == nil {
@@ -140,7 +236,7 @@ func (e *ElevenLabs) voices(ctx context.Context, env *Env, search string) ([]ele
 	var r struct {
 		Voices []elevenVoice `json:"voices"`
 	}
-	if err := callJSON(ctx, request{URL: e.base() + "/v2/voices?" + q.Encode(), Header: e.header(env)}, &r); err != nil {
+	if err := e.getJSON(ctx, env, request{URL: e.base() + "/v2/voices?" + q.Encode()}, &r); err != nil {
 		return nil, err
 	}
 	return r.Voices, nil
@@ -190,9 +286,9 @@ func (e *ElevenLabs) Call(ctx context.Context, env *Env, tool string, a Args) (s
 			}
 			voice, name = vs[0].ID, vs[0].Name
 		}
-		audio, _, err := do(ctx, request{Method: "POST",
+		audio, err := e.send(ctx, env, request{Method: "POST",
 			URL:    e.base() + "/v1/text-to-speech/" + url.PathEscape(voice) + "?output_format=mp3_44100_128",
-			Header: map[string]string{"xi-api-key": env.Cred.Token, "Accept": "audio/mpeg"},
+			Header: map[string]string{"Accept": "audio/mpeg"},
 			Body:   map[string]any{"text": text, "model_id": elevenModel}})
 		if err != nil {
 			return "", err

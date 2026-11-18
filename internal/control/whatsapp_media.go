@@ -88,13 +88,22 @@ func (s *Server) transcribe(ctx context.Context, agentID string, f store.File) (
 	if !ok || !isEl {
 		return "", errors.New("conecte o ElevenLabs em Plugins para transcrever áudios")
 	}
-	conn, _, err := s.pickAccount(ctx, con.Info(), agentID, "")
-	if err != nil {
+	if _, _, err := s.pickAccount(ctx, con.Info(), agentID, ""); err != nil {
 		return "", errors.New("conecte o ElevenLabs em Plugins (chave com Speech to Text) para transcrever áudios")
 	}
-	return s.useConnection(ctx, con, conn, func(ctx context.Context, env *connect.Env) (string, error) {
-		return el.Transcribe(ctx, env, f.Name, f.Mime, f.Data)
-	}, agentID, "elevenlabs_transcrever")
+	// Accounts connected with the ElevenLabs login cannot transcribe: the
+	// first one with a key does, the one with the most credit left first.
+	var err error = connect.ErrNoTranscribe
+	for _, conn := range s.poolOrder(ctx, con, agentID) {
+		var out string
+		out, err = s.useConnection(ctx, con, conn, func(ctx context.Context, env *connect.Env) (string, error) {
+			return el.Transcribe(ctx, env, f.Name, f.Mime, f.Data)
+		}, agentID, "elevenlabs_transcrever")
+		if !errors.Is(err, connect.ErrNoTranscribe) && !connect.IsCredit(err) {
+			return out, err
+		}
+	}
+	return "", err
 }
 
 // waMessageContent is what a message says once its media is fetched: the

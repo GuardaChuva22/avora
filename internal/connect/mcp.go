@@ -37,6 +37,9 @@ type MCPApp struct {
 	HelpURL string
 	// Auth is how the server is reached (mcp.AuthOAuth for the catalog).
 	Auth mcp.Auth
+	// Scope, when set, is what the login asks for instead of every scope
+	// the server lists.
+	Scope string
 	// HTTP is for tests; nil means mcp.SafeClient.
 	HTTP *http.Client
 	// Local runs a stdio server through Avora's sandbox.
@@ -611,6 +614,9 @@ func (m *MCPApp) BeginAuth(ctx context.Context, redirect, state, verifier string
 	}
 	if auth != mcp.AuthOAuth {
 		return "", nil, fmt.Errorf("o %s não oferece login de um clique para apps como o Avora", m.Name)
+	}
+	if m.Scope != "" {
+		md.Scope = m.Scope
 	}
 	reg, err := mcp.Register(ctx, m.HTTP, md, redirect)
 	if err != nil {

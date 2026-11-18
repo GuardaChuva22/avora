@@ -15,6 +15,9 @@ func (e *ElevenLabs) Transcribe(ctx context.Context, env *Env, name, mime string
 	if len(audio) == 0 {
 		return "", errors.New("áudio vazio")
 	}
+	if ByLogin(env.Cred) {
+		return "", ErrNoTranscribe
+	}
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	_ = w.WriteField("model_id", "scribe_v1")
@@ -38,7 +41,7 @@ func (e *ElevenLabs) Transcribe(ctx context.Context, env *Env, name, mime string
 	var out struct {
 		Text string `json:"text"`
 	}
-	if err := callJSON(ctx, request{Method: "POST", URL: e.base() + "/v1/speech-to-text", Header: e.header(env),
+	if err := e.getJSON(ctx, env, request{Method: "POST", URL: e.base() + "/v1/speech-to-text",
 		Body: body.Bytes(), ContentType: w.FormDataContentType()}, &out); err != nil {
 		return "", err
 	}
@@ -48,6 +51,10 @@ func (e *ElevenLabs) Transcribe(ctx context.Context, env *Env, name, mime string
 	}
 	return text, nil
 }
+
+// ErrNoTranscribe: the account connected with the ElevenLabs login, which
+// does not grant Speech to Text; an account with a key has to transcribe.
+var ErrNoTranscribe = errors.New("contas conectadas pelo login da ElevenLabs não transcrevem; adicione uma chave com Speech to Text")
 
 func orName(name string) string {
 	if strings.TrimSpace(name) == "" {

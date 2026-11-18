@@ -165,7 +165,7 @@ Item {
         const key = target || c.kind;
         page.busy = c.kind;
         page.fail("", "");
-        if (c.auth === "oauth") {
+        if (c.auth === "oauth" || token === page.byLogin) {
             Api.connectOAuth(c.kind, target || "", c.oauth_port || 0, page.done(key));
             return;
         }
@@ -180,6 +180,9 @@ Item {
     function accountPath(c, conn, tail) {
         return "/v1/connectors/" + c.kind + (tail || "") + "?id=" + encodeURIComponent(conn.id);
     }
+    // byLogin, passed as the token, connects a token app with its own login
+    // (ElevenLabs) instead of a pasted key.
+    readonly property string byLogin: "\u0000login"
     function cancel() {
         Api.cancelOAuth();
         page.busy = "";
@@ -619,9 +622,19 @@ Item {
             text: page.error
         }
 
+        // Lost access with the app's login: log in again.
+        PrimaryButton {
+            visible: det.status === "reconnect" && !!det.c && !!det.c.login && !!det.conn && /· login$/.test(det.conn.account || "")
+            text: det.working ? "Esperando o navegador…" : "Entrar de novo com a " + det.c.name
+            busy: det.working
+            enabled: !det.working
+            onClicked: page.connect(det.c, page.byLogin, null, det.conn.id)
+        }
+
         // Lost access with a token: paste a new one.
         Row {
             visible: det.status === "reconnect" && !!det.c && det.c.auth === "token" && !det.c.fields
+                && !(!!det.c.login && !!det.conn && /· login$/.test(det.conn.account || ""))
             width: parent.width
             spacing: 10
             Field {
@@ -666,7 +679,14 @@ Item {
                     onClicked: det.c.auth === "oauth" ? page.connect(det.c) : det.adding = true
                 }
                 GhostButton {
-                    visible: det.working && det.c.auth === "oauth"
+                    visible: !det.adding && !!det.c.login && !det.working
+                    small: true
+                    icon: "plus"
+                    text: "Entrar com outra conta da " + det.c.name
+                    onClicked: page.connect(det.c, page.byLogin)
+                }
+                GhostButton {
+                    visible: det.working && (det.c.auth === "oauth" || !!det.c.login)
                     small: true
                     text: "Cancelar"
                     onClicked: page.cancel()
@@ -938,6 +958,19 @@ Item {
                         }
                     }
                 }
+                PrimaryButton {
+                    visible: !!tile.c.login
+                    text: tile.working ? "Esperando o navegador…" : "Entrar com a " + tile.c.name
+                    busy: tile.working
+                    enabled: !tile.working
+                    onClicked: page.connect(tile.c, page.byLogin)
+                }
+                Text {
+                    visible: !!tile.c.login
+                    text: "ou cole uma chave:"
+                    color: Theme.text3
+                    font.pixelSize: Theme.fontSmall
+                }
                 Field {
                     id: token
                     visible: tile.c.auth === "token" && !tile.c.fields
@@ -964,6 +997,11 @@ Item {
                                 values[tile.c.fields[i].key] = formRep.itemAt(i).text.trim();
                             page.connect(tile.c, values, null);
                         }
+                    }
+                    GhostButton {
+                        visible: tile.working && !!tile.c.login
+                        text: "Cancelar"
+                        onClicked: page.cancel()
                     }
                     GhostButton {
                         text: "Fechar"

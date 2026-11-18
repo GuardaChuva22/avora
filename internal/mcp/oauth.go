@@ -46,7 +46,7 @@ type Auth string
 
 const (
 	AuthNone  Auth = "none"  // open server
-	AuthOAuth Auth = "oauth" // one-click login (dynamic client registration)
+	AuthOAuth Auth = "oauth" // one-click login (dynamic registration or a client metadata document)
 	AuthToken Auth = "token" // a key the owner pastes
 )
 
@@ -58,7 +58,19 @@ type Metadata struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	RegistrationEndpoint  string `json:"registration_endpoint,omitempty"`
+	// ClientDocument: the server takes a client metadata document's URL
+	// as the client id, instead of signing clients up.
+	ClientDocument bool `json:"client_document,omitempty"`
 }
+
+// ClientMetadataURL is Avora's public OAuth client metadata document, for
+// logins that identify apps by URL (CIMD) instead of signing them up. It
+// lists the loopback redirects the desktop app listens on.
+const ClientMetadataURL = "https://raw.githubusercontent.com/GuardaChuva22/avora/main/docs/oauth/client.json"
+
+// ClientPort is the loopback port that document lists, for logins that
+// match the redirect exactly.
+const ClientPort = 47613
 
 var (
 	resourceMetaRe = regexp.MustCompile(`resource_metadata="([^"]+)"`)
@@ -147,6 +159,7 @@ func Discover(ctx context.Context, hc *http.Client, serverURL string) (Auth, Met
 		AuthorizationEndpoint string `json:"authorization_endpoint"`
 		TokenEndpoint         string `json:"token_endpoint"`
 		RegistrationEndpoint  string `json:"registration_endpoint"`
+		ClientDocument        bool   `json:"client_id_metadata_document_supported"`
 	}
 	ok := false
 	for _, u := range []string{
@@ -166,12 +179,13 @@ func Discover(ctx context.Context, hc *http.Client, serverURL string) (Auth, Met
 	}
 	md.Issuer = orStr(as.Issuer, issuer)
 	md.AuthorizationEndpoint, md.TokenEndpoint, md.RegistrationEndpoint = as.AuthorizationEndpoint, as.TokenEndpoint, as.RegistrationEndpoint
+	md.ClientDocument = as.ClientDocument
 	for _, e := range []string{md.AuthorizationEndpoint, md.TokenEndpoint} {
 		if !strings.HasPrefix(e, "https://") {
 			return "", Metadata{}, fmt.Errorf("o login do servidor não usa https (%s)", e)
 		}
 	}
-	if md.RegistrationEndpoint == "" || !strings.HasPrefix(md.RegistrationEndpoint, "https://") {
+	if (md.RegistrationEndpoint == "" || !strings.HasPrefix(md.RegistrationEndpoint, "https://")) && !md.ClientDocument {
 		return AuthToken, md, nil
 	}
 	return AuthOAuth, md, nil
@@ -191,8 +205,12 @@ type Registration struct {
 }
 
 // Register signs Avora up as a client of the server's login, for this
-// redirect address.
+// redirect address. A login that reads client metadata documents needs no
+// sign-up: Avora's document's URL is the client id.
 func Register(ctx context.Context, hc *http.Client, md Metadata, redirect string) (Registration, error) {
+	if md.ClientDocument && (md.RegistrationEndpoint == "" || !strings.HasPrefix(md.RegistrationEndpoint, "https://")) {
+		return Registration{ClientID: ClientMetadataURL}, nil
+	}
 	if hc == nil {
 		hc = SafeClient()
 	}

@@ -64,6 +64,9 @@ type Info struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Auth        string   `json:"auth"` // "token" or "oauth"
+	// Login: a token app that also connects with its own browser login
+	// (oauth/start), besides the token box.
+	Login bool `json:"login,omitempty"`
 	Help        string   `json:"help"` // how to get the token or set it up
 	HelpURL     string   `json:"help_url,omitempty"`
 	Apps        []string `json:"apps,omitempty"`
