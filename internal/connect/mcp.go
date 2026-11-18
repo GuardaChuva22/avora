@@ -83,6 +83,9 @@ func (m *MCPApp) Info() Info {
 	switch m.auth() {
 	case mcp.AuthOAuth:
 		info.Help = "Clique em Conectar: o navegador abre o login do " + m.Name + ". Autorize e volte ao Avora."
+		// The port the client metadata document lists; servers that sign
+		// apps up take it as well as any other.
+		info.OAuthPort = mcp.ClientPort
 	case mcp.AuthToken:
 		info.Help, info.HelpURL = "Este servidor pede uma chave de API. Gere no "+m.Name+" e cole aqui.", m.HelpURL
 		if m.Help != "" {

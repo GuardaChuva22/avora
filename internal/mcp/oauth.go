@@ -65,8 +65,10 @@ type Metadata struct {
 
 // ClientMetadataURL is Avora's public OAuth client metadata document, for
 // logins that identify apps by URL (CIMD) instead of signing them up. It
-// lists the loopback redirects the desktop app listens on.
-const ClientMetadataURL = "https://raw.githubusercontent.com/GuardaChuva22/avora/main/docs/oauth/client.json"
+// lists the loopback redirect the desktop app listens on. It is served
+// through jsDelivr, which sends it as application/json (GitHub raw sends
+// text/plain, which a login may refuse).
+const ClientMetadataURL = "https://cdn.jsdelivr.net/gh/GuardaChuva22/avora@main/docs/oauth/client.json"
 
 // ClientPort is the loopback port that document lists, for logins that
 // match the redirect exactly.
