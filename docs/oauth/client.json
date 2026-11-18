@@ -1,0 +1,14 @@
+{
+  "client_id": "https://raw.githubusercontent.com/GuardaChuva22/avora/main/docs/oauth/client.json",
+  "client_name": "Avora",
+  "client_uri": "https://github.com/GuardaChuva22/avora",
+  "redirect_uris": [
+    "http://127.0.0.1/callback",
+    "http://127.0.0.1:47613/callback",
+    "http://localhost/callback"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "application_type": "native"
+}
