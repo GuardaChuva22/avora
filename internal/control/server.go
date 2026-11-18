@@ -235,6 +235,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerPeople(mux)
 	s.registerWorkspaces(mux)
 	s.registerHome(mux)
+	s.registerNotices(mux)
 	s.registerTemplates(mux)
 	if s.ui != nil {
 		mux.Handle("GET /", s.ui)

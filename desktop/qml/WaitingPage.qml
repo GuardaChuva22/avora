@@ -3,8 +3,8 @@ import QtQuick.Controls.Basic
 import Avora
 import "util.js" as U
 
-// Esperando você (Phase 6): pending approvals, multiple-choice questions and
-// mission decisions, using the existing ApprovalCards and QuestionCard controls.
+// Esperando você: pending approvals, multiple-choice questions and mission
+// decisions waiting for the owner across the active workspace.
 Item {
     id: page
     property var approvals: []
@@ -21,6 +21,35 @@ Item {
     readonly property var questions: waitingItems.filter(x => x.kind === "question")
     readonly property var decisions: waitingItems.filter(x => x.kind === "decision")
     readonly property int totalCount: approvals.length + questions.length + decisions.length
+
+    function agentPhoto(agentId) {
+        const a = agents.find(x => x.id === agentId);
+        return a ? U.photo(a) : "";
+    }
+
+    function openConversationFor(agentId, convId) {
+        if (typeof win !== "undefined" && win) {
+            if (win.openAgent && agentId) {
+                win.openAgent(agentId);
+                return;
+            }
+            if (win.openAgentConv && agentId) {
+                win.openAgentConv(agentId, convId || "");
+                return;
+            }
+        }
+        openAgentConv(agentId || "", convId || "");
+    }
+
+    function subtitleText() {
+        if (loading && totalCount === 0)
+            return "Conferindo se algum agente espera por você…";
+        if (totalCount === 0)
+            return "Nenhuma pendência agora.";
+        if (totalCount === 1)
+            return "1 item aguarda sua resposta para o agente continuar.";
+        return totalCount + " itens aguardam sua resposta.";
+    }
 
     function load() {
         Api.get("/v1/approvals?status=pending&limit=50", (err, list) => {
@@ -53,7 +82,7 @@ Item {
         error = "";
         // Remove optimistically so the card answers at once while the turn starts.
         waitingItems = waitingItems.filter(x => x.id !== item.id);
-        Api.post("/v1/conversations/" + item.conversation_id + "/messages", { content: clean }, err => {
+        Api.post("/v1/conversations/" + encodeURIComponent(item.conversation_id) + "/messages", { content: clean }, err => {
             const done = Object.assign({}, page.sending);
             delete done[item.id];
             page.sending = done;
@@ -67,7 +96,7 @@ Item {
         if (!missionId)
             return;
         error = "";
-        Api.post("/v1/missions/" + missionId + "/cancel", null, err => {
+        Api.post("/v1/missions/" + encodeURIComponent(missionId) + "/cancel", null, err => {
             if (err)
                 page.error = err;
             page.load();
@@ -79,12 +108,24 @@ Item {
 
     Connections {
         target: Api
+        function onWorkspaceChanged() {
+            page.approvals = [];
+            page.waitingItems = [];
+            page.agents = [];
+            page.customOpen = ({});
+            page.loading = true;
+            page.load();
+        }
         function onLiveEvent(e) {
             if (!page.visible)
                 return;
             const t = e.type || "";
             if (t.startsWith("approval.") || t.startsWith("mission.") || t.startsWith("message."))
                 reloadTimer.restart();
+        }
+        function onLiveReset() {
+            if (page.visible)
+                page.load();
         }
     }
 
@@ -112,39 +153,37 @@ Item {
 
         Column {
             id: body
-            readonly property real colWidth: Math.min(scroller.width - 2 * Theme.gutter, 780)
+            readonly property real colWidth: Math.min(scroller.width - 2 * Theme.gutter, 820)
             x: Math.max(Theme.gutter, (scroller.width - colWidth) / 2)
             y: 44
             width: colWidth
             spacing: Theme.space5
 
-            Item {
+            PageHead {
                 width: parent.width
-                height: Math.max(head.implicitHeight, backBtn.implicitHeight)
-
-                PageHead {
-                    id: head
-                    width: parent.width - backBtn.width - Theme.space3
-                    eyebrow: "Trabalho visível"
-                    title: "Esperando você"
-                    sub: page.totalCount === 0
-                        ? "Nenhuma pendência agora."
-                        : (page.totalCount === 1 ? "1 item aguarda sua resposta para o agente continuar."
-                                                 : page.totalCount + " itens aguardam sua resposta.")
-                }
-
-                GhostButton {
-                    id: backBtn
-                    anchors { right: parent.right; bottom: head.bottom }
-                    icon: "back"
-                    text: "Início"
-                    onClicked: page.goPage("home")
-                }
+                eyebrow: "Trabalho visível"
+                title: "Esperando você"
+                sub: page.subtitleText()
             }
 
             ErrorBanner {
                 width: parent.width
                 text: page.error
+            }
+
+            // Loading state
+            Card {
+                visible: page.loading && page.totalCount === 0
+                width: parent.width
+                height: 88
+                padding: Theme.space5
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Conferindo aprovações, perguntas e decisões pendentes…"
+                    color: Theme.text3
+                    font.pixelSize: Theme.fontBody
+                }
             }
 
             // Empty state
@@ -176,7 +215,7 @@ Item {
                 }
             }
 
-            // 1. Approvals (reusing ApprovalCards directly)
+            // 1. Approvals
             Column {
                 visible: page.approvals.length > 0
                 width: parent.width
@@ -192,7 +231,7 @@ Item {
                 }
             }
 
-            // 2. Questions (reusing QuestionCard directly)
+            // 2. Questions
             Column {
                 id: qSec
                 visible: page.questions.length > 0
@@ -218,7 +257,7 @@ Item {
 
                             Item {
                                 width: parent.width
-                                height: 28
+                                height: 30
 
                                 Row {
                                     spacing: Theme.space2
@@ -226,6 +265,7 @@ Item {
                                     Avatar {
                                         size: 26
                                         name: qWrap.modelData.agent_name || qWrap.modelData.agent_id
+                                        photo: page.agentPhoto(qWrap.modelData.agent_id)
                                         tint: qWrap.modelData.agent_color || Theme.text2
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
@@ -249,7 +289,7 @@ Item {
                                     small: true
                                     icon: "chat"
                                     text: "Abrir conversa"
-                                    onClicked: page.openAgentConv(qWrap.modelData.agent_id, qWrap.modelData.conversation_id)
+                                    onClicked: page.openConversationFor(qWrap.modelData.agent_id, qWrap.modelData.conversation_id)
                                 }
                             }
 
@@ -319,7 +359,7 @@ Item {
 
                             Item {
                                 width: parent.width
-                                height: 28
+                                height: 30
 
                                 Row {
                                     spacing: Theme.space2
@@ -327,6 +367,7 @@ Item {
                                     Avatar {
                                         size: 26
                                         name: dCard.modelData.agent_name || dCard.modelData.agent_id
+                                        photo: page.agentPhoto(dCard.modelData.agent_id)
                                         tint: dCard.modelData.agent_color || Theme.warn
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
@@ -346,7 +387,7 @@ Item {
                                         small: true
                                         icon: "chat"
                                         text: "Abrir conversa"
-                                        onClicked: page.openAgentConv(dCard.modelData.agent_id, dCard.modelData.conversation_id)
+                                        onClicked: page.openConversationFor(dCard.modelData.agent_id, dCard.modelData.conversation_id)
                                     }
                                     GhostButton {
                                         small: true

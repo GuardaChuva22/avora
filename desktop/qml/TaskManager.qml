@@ -3,8 +3,8 @@ import QtQuick.Controls.Basic
 import Avora
 import "util.js" as U
 
-// Gerenciador de tarefas (Phase 6): everything each agent is running right now,
-// with live elapsed time, inspection and Parar (notifying the agent).
+// Gerenciador de tarefas: everything each agent is running right now in the
+// active workspace, with live elapsed time, inspection and stop controls.
 Item {
     id: page
     property var tasks: []
@@ -41,6 +41,16 @@ Item {
         return groups;
     }
 
+    function subtitleText() {
+        if (loading && tasks.length === 0)
+            return "Verificando as execuções ativas deste espaço…";
+        if (tasks.length === 0)
+            return "Nenhuma execução em andamento neste momento.";
+        if (tasks.length === 1)
+            return "1 execução rodando agora.";
+        return tasks.length + " execuções rodando agora.";
+    }
+
     function kindLabel(t) {
         if (t.kind === "run") {
             if (t.engine === "codex")
@@ -68,6 +78,49 @@ Item {
         if (sec < 3600)
             return "há " + Math.round(sec / 60) + " min";
         return "há " + Math.round(sec / 3600) + " h";
+    }
+
+    function inspectTask(m) {
+        if (!m)
+            return;
+        if (m.run_id) {
+            if (typeof win !== "undefined" && win && win.openFloat) {
+                win.openFloat("RunPane.qml", { runId: m.run_id, agents: page.agents });
+                return;
+            }
+            openRunId = m.run_id;
+            return;
+        }
+        if (m.kind === "channel" && m.conversation_id) {
+            if (typeof win !== "undefined" && win && win.openChannel) {
+                win.openChannel(m.conversation_id);
+                return;
+            }
+            openChannel(m.conversation_id);
+            return;
+        }
+        if (m.agent_id) {
+            if (typeof win !== "undefined" && win) {
+                if (win.openAgent) {
+                    win.openAgent(m.agent_id);
+                    return;
+                }
+                if (win.openAgentConv) {
+                    win.openAgentConv(m.agent_id, m.conversation_id || "");
+                    return;
+                }
+            }
+            openAgentConv(m.agent_id, m.conversation_id || "");
+        }
+    }
+
+    function triggerOpenAgent(agentId) {
+        if (!agentId || typeof win === "undefined" || !win)
+            return;
+        if (win.openAgent)
+            win.openAgent(agentId);
+        else if (win.openAgentConv)
+            win.openAgentConv(agentId, "");
     }
 
     function load() {
@@ -121,12 +174,23 @@ Item {
 
     Connections {
         target: Api
+        function onWorkspaceChanged() {
+            page.tasks = [];
+            page.agents = [];
+            page.openRunId = "";
+            page.loading = true;
+            page.load();
+        }
         function onLiveEvent(e) {
             if (!page.visible)
                 return;
             const t = e.type || "";
             if (t.startsWith("job.") || t.startsWith("mission.") || t.startsWith("channel.") || t.startsWith("message."))
                 reloadTimer.restart();
+        }
+        function onLiveReset() {
+            if (page.visible)
+                page.load();
         }
     }
 
@@ -165,32 +229,31 @@ Item {
             width: colWidth
             spacing: Theme.space5
 
-            Item {
+            PageHead {
                 width: parent.width
-                height: Math.max(head.implicitHeight, backBtn.implicitHeight)
-
-                PageHead {
-                    id: head
-                    width: parent.width - backBtn.width - Theme.space3
-                    eyebrow: "Trabalho visível"
-                    title: "Gerenciador de tarefas"
-                    sub: page.tasks.length === 0
-                        ? "Nenhuma execução em andamento neste momento."
-                        : (page.tasks.length === 1 ? "1 execução rodando agora." : page.tasks.length + " execuções rodando agora.")
-                }
-
-                GhostButton {
-                    id: backBtn
-                    anchors { right: parent.right; bottom: head.bottom }
-                    icon: "back"
-                    text: "Início"
-                    onClicked: page.goPage("home")
-                }
+                eyebrow: "Trabalho visível"
+                title: "Gerenciador de tarefas"
+                sub: page.subtitleText()
             }
 
             ErrorBanner {
                 width: parent.width
                 text: page.error
+            }
+
+            // Loading state
+            Card {
+                visible: page.loading && page.tasks.length === 0
+                width: parent.width
+                height: 88
+                padding: Theme.space5
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Verificando o que os agentes estão fazendo agora…"
+                    color: Theme.text3
+                    font.pixelSize: Theme.fontBody
+                }
             }
 
             // Empty state
@@ -252,13 +315,22 @@ Item {
 
                             Column {
                                 anchors.verticalCenter: parent.verticalCenter
-                                spacing: 2
+                                spacing: Theme.space1
 
                                 Text {
                                     text: grpCard.modelData.name
-                                    color: Theme.white
+                                    color: agHdrArea.containsMouse ? Theme.white : Theme.text
                                     font.pixelSize: Theme.fontLarge
                                     font.weight: Font.DemiBold
+                                    font.underline: agHdrArea.containsMouse
+
+                                    MouseArea {
+                                        id: agHdrArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: page.triggerOpenAgent(grpCard.modelData.agent_id)
+                                    }
                                 }
                                 Text {
                                     visible: grpCard.modelData.role !== ""
@@ -294,7 +366,7 @@ Item {
                                             rightMargin: Theme.space3
                                             verticalCenter: parent.verticalCenter
                                         }
-                                        spacing: 3
+                                        spacing: Theme.space1
 
                                         Row {
                                             width: parent.width
@@ -302,7 +374,7 @@ Item {
 
                                             Rectangle {
                                                 height: 18
-                                                width: kLbl.implicitWidth + 12
+                                                width: kLbl.implicitWidth + 2 * Theme.space2
                                                 radius: height / 2
                                                 color: Theme.wash4
                                                 anchors.verticalCenter: parent.verticalCenter
@@ -341,19 +413,11 @@ Item {
                                         spacing: Theme.space2
 
                                         GhostButton {
-                                            visible: !!(tRow.modelData.run_id || tRow.modelData.conversation_id)
+                                            visible: !!(tRow.modelData.run_id || tRow.modelData.conversation_id || tRow.modelData.agent_id)
                                             small: true
                                             icon: tRow.modelData.run_id ? "terminal" : "chat"
                                             text: "Ver"
-                                            onClicked: {
-                                                const m = tRow.modelData;
-                                                if (m.run_id)
-                                                    page.openRunId = m.run_id;
-                                                else if (m.kind === "channel" && m.conversation_id)
-                                                    page.openChannel(m.conversation_id);
-                                                else if (m.conversation_id)
-                                                    page.openAgentConv(m.agent_id, m.conversation_id);
-                                            }
+                                            onClicked: page.inspectTask(tRow.modelData)
                                         }
 
                                         GhostButton {

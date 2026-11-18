@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Avora
 
-// Workspace-wide shared memory page: facts, rules, preferences and decisions
-// read by every agent in the current workspace.
+// Memória do time: workspace-wide facts, rules, preferences and decisions
+// shared across every agent in the active workspace.
 Item {
     id: page
     property string selectedKind: "fact"
@@ -30,26 +30,36 @@ Item {
         quickInput.text = "";
     }
 
+    Connections {
+        target: Api
+        function onWorkspaceChanged() {
+            quickInput.text = "";
+            page.selectedKind = "fact";
+        }
+    }
+
     Flickable {
+        id: scroller
         anchors.fill: parent
-        contentHeight: col.implicitHeight + 2 * Theme.gutter
+        contentHeight: body.implicitHeight + 96
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: SlimScrollBar {}
         SmoothWheel {}
 
         Column {
-            id: col
-            width: Math.min(820, parent.width - 2 * Theme.gutter)
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: Theme.gutter
+            id: body
+            readonly property real colWidth: Math.min(scroller.width - 2 * Theme.gutter, 820)
+            x: Math.max(Theme.gutter, (scroller.width - colWidth) / 2)
+            y: 44
+            width: colWidth
             spacing: Theme.space5
 
             PageHead {
                 width: parent.width
                 eyebrow: "Conhecimento compartilhado"
                 title: "Memória do time"
-                sub: "O que vale para todos os funcionários deste espaço: decisões, regras fixas, fatos e aprendizados compartilhados."
+                sub: "O que vale para todos os agentes deste espaço: decisões, regras fixas, fatos e aprendizados compartilhados."
             }
 
             Card {
@@ -94,6 +104,7 @@ Item {
                             id: saveBtn
                             icon: "plus"
                             text: "Guardar"
+                            enabled: quickInput.text.trim() !== ""
                             onClicked: page.teachTeam()
                         }
                     }
