@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Talks to the Avora native engine from the VPS shell, streaming the answer.
+#
+#   sudo /usr/local/bin/avora-chat "sua pergunta"              # new conversation
+#   sudo /usr/local/bin/avora-chat -c <conversation-id> "..."  # continue one
+#
+# Until the app exists, this is the quickest way to try the chat.
+set -euo pipefail
+
+CONV=""
+if [ "${1:-}" = "-c" ]; then CONV="${2:?conversation id}"; shift 2; fi
+MSG="${1:?usage: avora-chat [-c id] \"message\"}"
+
+# shellcheck disable=SC1091
+. /etc/avora/avora.env
+API=http://127.0.0.1:3190
+AUTH="Authorization: Bearer $AVORA_ADMIN_TOKEN"
+
+if [ -z "$CONV" ]; then
+  CONV=$(curl -fsS -X POST "$API/v1/conversations" -H "$AUTH" -H "Content-Type: application/json" -d '{}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+fi
+
+BODY=$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1]}))' "$MSG")
+curl -fsSN -X POST "$API/v1/conversations/$CONV/messages" -H "$AUTH" \
+  -H "Content-Type: application/json" -H "Accept: text/event-stream" -d "$BODY" \
+| python3 -u -c '
+import json, sys
+event = None
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if line.startswith("event: "):
+        event = line[7:]
+    elif line.startswith("data: "):
+        data = json.loads(line[6:])
+        if event == "delta":
+            sys.stdout.write(data["content"]); sys.stdout.flush()
+        elif event == "done":
+            print("\n\n[%s | %d+%d tokens | %.1fs]" % (data.get("model", ""), data.get("prompt_tokens", 0),
+                  data.get("completion_tokens", 0), data.get("duration_ms", 0) / 1000))
+        elif event == "error":
+            print("\n[erro] " + data["error"], file=sys.stderr); sys.exit(1)
+'
+echo "conversa: $CONV  (continue com: sudo /usr/local/bin/avora-chat -c $CONV \"...\")"

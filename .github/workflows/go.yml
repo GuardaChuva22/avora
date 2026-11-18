@@ -1,0 +1,28 @@
+name: Go checks
+on:
+  push:
+    paths: ["**/*.go", "**/*.sql", "go.mod", "go.sum", ".github/workflows/go.yml"]
+  pull_request:
+    paths: ["**/*.go", "**/*.sql", "go.mod", "go.sum", ".github/workflows/go.yml"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: avora-test
+          POSTGRES_DB: avora_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d avora_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      AVORA_TEST_DATABASE_URL: postgres://postgres:avora-test@localhost:5432/avora_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -v ./...
+      - run: go vet ./...

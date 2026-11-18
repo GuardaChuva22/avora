@@ -1,0 +1,55 @@
+[Unit]
+Description=Avora runtime (server node)
+After=avora-server.service
+Wants=avora-server.service
+# A revoked node exits; stop retrying after a few attempts.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=avora
+Group=avora
+Environment=AVORA_SERVER_URL=http://127.0.0.1:3190
+Environment=AVORA_STATE_FILE=/var/lib/avora/runtime/node.json
+# AVORA_PAIRING_CODE, only present until the first pairing succeeds.
+EnvironmentFile=-/etc/avora/runtime.env
+# Agent CLIs (installed by install-agents.sh) and their own logins.
+Environment=AVORA_WORKSPACE=/var/lib/avora/work
+Environment=AVORA_CLAUDE_BIN=/var/lib/avora/.local/bin/claude
+Environment=AVORA_CLAUDE_CONFIG_DIR=/var/lib/avora/claude
+Environment=AVORA_CODEX_BIN=/var/lib/avora/.local/bin/codex
+Environment=AVORA_CODEX_HOME=/var/lib/avora/codex
+Environment=AVORA_MAX_AGENTS=3
+Environment=PATH=/var/lib/avora/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/avora/bin/avora-runtime
+Restart=always
+RestartSec=10
+# Up to 3 agent CLIs run inside this unit (D11): ~300-500 MB each.
+MemoryHigh=1536M
+MemoryMax=2G
+TasksMax=512
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/avora
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# executar with network: pasta needs the tun device for the sandbox's own
+# network namespace.
+BindPaths=/dev/net/tun
+DeviceAllow=/dev/net/tun rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Runs an agent task (Claude Code or Codex) on a node and waits for it.
+#
+#   sudo /usr/local/bin/avora-agent [-n windows|vps|auto] [-e claude|codex] [-m model]
+#        [-M read|edit] [-w workdir] [-t minutes] "tarefa"
+#
+# Example: sudo /usr/local/bin/avora-agent -n vps -e claude -m haiku "diga oi"
+set -euo pipefail
+
+NODE=auto ENGINE=claude MODEL="" MODE=read WORKDIR="" MINUTES=10
+while getopts "n:e:m:M:w:t:" opt; do
+  case $opt in
+    n) NODE=$OPTARG ;; e) ENGINE=$OPTARG ;; m) MODEL=$OPTARG ;;
+    M) MODE=$OPTARG ;; w) WORKDIR=$OPTARG ;; t) MINUTES=$OPTARG ;;
+    *) exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+PROMPT="${1:?usage: avora-agent [options] \"tarefa\"}"
+
+# shellcheck disable=SC1091
+. /etc/avora/avora.env
+API=http://127.0.0.1:3190
+AUTH="Authorization: Bearer $AVORA_ADMIN_TOKEN"
+
+BODY=$(python3 -c 'import json,sys; a=dict(zip(["target","engine","model","mode","workdir","max_minutes","prompt"], sys.argv[1:]))
+agent={k:a[k] for k in ["engine","model","mode","workdir","prompt"] if a[k]}; agent["max_minutes"]=int(a["max_minutes"])
+print(json.dumps({"target":a["target"],"action":"agent.run","agent":agent}))' "$NODE" "$ENGINE" "$MODEL" "$MODE" "$WORKDIR" "$MINUTES" "$PROMPT")
+ID=$(curl -fsS -X POST "$API/v1/jobs" -H "$AUTH" -H "Content-Type: application/json" -d "$BODY" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+echo "job $ID ($ENGINE${MODEL:+ $MODEL}, $MODE, node $NODE)"
+
+START=$(date +%s)
+LAST=0
+while :; do
+  curl -fsS "$API/v1/events?job=$ID&after=$LAST" -H "$AUTH" | python3 -c '
+import json, sys
+last = int(sys.argv[1])
+for e in json.load(sys.stdin):
+    last = e["id"]
+    p = e["payload"]
+    if e["type"] == "agent.step":
+        print("  ->", p.get("tool"), p.get("summary", ""))
+    elif e["type"] in ("job.succeeded", "job.failed", "job.timed_out", "job.canceled"):
+        s = p.get("stats") or {}
+        if s:
+            print("  [%s | %s | %d turnos | %d+%d tokens | %.1fs]" % (s.get("engine"), s.get("model"), s.get("turns", 0),
+                  s.get("input_tokens", 0), s.get("output_tokens", 0), s.get("duration_ms", 0) / 1000))
+print(last, file=sys.stderr)' "$LAST" 2>/tmp/avora-agent.$$ || true
+  LAST=$(cat /tmp/avora-agent.$$ 2>/dev/null || echo "$LAST")
+  STATUS=$(curl -fsS "$API/v1/jobs/$ID" -H "$AUTH" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+  case $STATUS in succeeded|failed|timed_out|canceled) break ;; esac
+  sleep 2
+done
+rm -f /tmp/avora-agent.$$
+curl -fsS "$API/v1/jobs/$ID" -H "$AUTH" | python3 -c '
+import json, sys
+j = json.load(sys.stdin)
+print("status:", j["status"])
+if j.get("output"): print(j["output"])
+if j.get("error"): print("erro:", j["error"])'
+echo "($(( $(date +%s) - START ))s)"

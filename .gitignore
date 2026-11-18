@@ -1,0 +1,37 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.sqlite
+secrets/
+credentials/
+state/
+bin/
+dist/
+*.exe
+*.test
+/build/
+cmake-build-*/
+.gradle/
+.idea/
+local.properties
+*.apk
+*.aab
+**/build/
+
+# Built web app (embedded by internal/webui)
+internal/webui/static/*
+!internal/webui/static/.keep
+web/node_modules/
+
+# Desktop app build output
+desktop/build/
+
+# Your server for the deploy scripts
+!.env.vps.example
+
+# Per-agent homes the runner creates inside a work folder
+.avora-home/
+/agents/

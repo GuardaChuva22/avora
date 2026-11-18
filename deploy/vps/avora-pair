@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Creates a one-time pairing code for a new Avora node (valid 10 minutes).
+#
+#   sudo avora-pair "meu-pc" windows
+#   sudo avora-pair "vps" vps
+#
+# Run on the VPS. Reads the admin token from /etc/avora/avora.env.
+set -euo pipefail
+
+NAME="${1:?usage: avora-pair <name> <windows|vps>}"
+KIND="${2:?usage: avora-pair <name> <windows|vps>}"
+case "$KIND" in windows|vps) ;; *) echo "kind must be windows or vps" >&2; exit 2 ;; esac
+case "$NAME" in *'"'*|*'\'*) echo "name must not contain quotes or backslashes" >&2; exit 2 ;; esac
+
+# shellcheck disable=SC1091
+. /etc/avora/avora.env
+curl -fsS -X POST http://127.0.0.1:3190/v1/nodes/pairing-codes \
+  -H "Authorization: Bearer $AVORA_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"$NAME\",\"kind\":\"$KIND\"}"
+echo
