@@ -2,7 +2,7 @@
   "client_id": "https://guardachuva22.github.io/avora/oauth/client.json",
   "client_name": "Avora",
   "client_uri": "https://github.com/GuardaChuva22/avora",
-  "redirect_uris": ["http://127.0.0.1:47613/callback"],
+  "redirect_uris": ["http://127.0.0.1/callback", "http://localhost/callback", "http://127.0.0.1:47613/callback"],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none"
