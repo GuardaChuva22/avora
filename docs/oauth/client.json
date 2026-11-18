@@ -1,5 +1,5 @@
 {
-  "client_id": "https://cdn.jsdelivr.net/gh/GuardaChuva22/avora@main/docs/oauth/client.json",
+  "client_id": "https://guardachuva22.github.io/avora/oauth/client.json",
   "client_name": "Avora",
   "client_uri": "https://github.com/GuardaChuva22/avora",
   "redirect_uris": ["http://127.0.0.1:47613/callback"],
