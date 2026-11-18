@@ -504,7 +504,9 @@ Item {
     }
 
     z: 55
-    visible: overlay.visible || chanEditor.visible
+    // Read the children's own state: their `visible` is false while this Item
+    // is hidden, so binding to it would never let the menu show.
+    visible: root.shown || focusScope.opacity > 0 || chanEditor.shown || chanEditor.opacity > 0
 
     Shortcut {
         sequence: "Esc"

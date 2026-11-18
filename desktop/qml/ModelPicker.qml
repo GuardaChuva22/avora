@@ -18,7 +18,9 @@ Item {
 
     signal saved(var updatedAgent)
 
-    visible: sheet.visible || undoToast.visible
+    // Read the sheet's own state, not sheet.visible: a child's `visible` is
+    // false while this Item is hidden, so binding to it never let us show.
+    visible: sheet.shown || sheet.opacity > 0 || picker.undoVisible
     z: 55
 
     function copyObj(o) {
